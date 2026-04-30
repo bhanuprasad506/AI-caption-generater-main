@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-type ContentType = "caption" | "product" | "ad";
+type ContentType = "caption" | "product" | "ad" | "hashtag";
 
 interface Payload {
   type: ContentType;
@@ -14,14 +14,25 @@ interface Payload {
   platform: string;
   tone: string;
   price?: string;
-  language?: string; // "English" | "Hindi" | "Hinglish"
-  festival?: string; // e.g. "Diwali", "Holi", "" for none
-  variant?: number;  // bump to force a fresh regeneration
+  language?: string;       // English | Hinglish | Hindi | Tamil | Telugu | Marathi | Bengali
+  festival?: string;       // e.g. "Diwali", "Holi", "" for none
+  variant?: number;        // bump to force a fresh regeneration
+  emojis?: boolean;        // default true
+  refine?: "shorter" | "festive" | null;
+  refineText?: string;     // existing text to refine
 }
 
 function buildPrompt(p: Payload): string {
+  const langDetail: Record<string, string> = {
+    Hinglish: " (mix of Hindi written in Roman/English script and English, like real Indian social media)",
+    Hindi: " (Devanagari script, natural conversational Hindi)",
+    Tamil: " (Tamil script, natural conversational Tamil)",
+    Telugu: " (Telugu script, natural conversational Telugu)",
+    Marathi: " (Devanagari script, natural conversational Marathi)",
+    Bengali: " (Bengali script, natural conversational Bengali)",
+  };
   const lang = p.language && p.language !== "English"
-    ? `\nLanguage: Write in ${p.language}${p.language === "Hinglish" ? " (mix of Hindi written in Roman/English script and English, like real Indian social media)" : p.language === "Hindi" ? " (Devanagari script, natural conversational Hindi)" : ""}.`
+    ? `\nLanguage: Write in ${p.language}${langDetail[p.language] ?? ""}.`
     : "";
   const fest = p.festival
     ? `\nFestival context: Weave in a natural, tasteful reference to ${p.festival} (greetings, themes, or offer angle).`
@@ -29,12 +40,43 @@ function buildPrompt(p: Payload): string {
   const fresh = p.variant && p.variant > 0
     ? `\nIMPORTANT: Produce a FRESH variation different from previous attempts. Use new hooks, angles and wording.`
     : "";
+  const emojiRule = p.emojis === false
+    ? `\nDo NOT use any emojis. Plain text only.`
+    : `\nUse tasteful emojis sparingly to add warmth.`;
+
+  // Refine mode: rewrite an existing piece of copy
+  if (p.refine && p.refineText) {
+    const instr = p.refine === "shorter"
+      ? "Rewrite the following copy to be roughly 40% shorter while keeping the core message and CTA. Punchier and tighter."
+      : "Rewrite the following copy to feel more festive and celebratory — warmer tone, festive vibes, joyful energy. Keep the same length and CTA.";
+    return `${instr}${lang}${emojiRule}
+
+Original copy:
+"""
+${p.refineText}
+"""
+
+Output ONLY the rewritten copy. No preamble, no explanations, no quote marks around the output.`;
+  }
+
+  if (p.type === "hashtag") {
+    return `Generate 20 high-performing ${p.platform} hashtags for an Indian small business.
+Business: ${p.businessName}
+Niche / Product: ${p.description}
+Tone: ${p.tone}${lang}${fest}${fresh}
+
+Rules:
+- Mix of: 5 broad/popular tags, 10 niche-specific tags, 5 location/India-relevant tags.
+- All lowercase, no spaces, no punctuation other than the # symbol.
+- One hashtag per line, no numbering, no commentary.
+- Output ONLY the 20 hashtags.`;
+  }
 
   if (p.type === "caption") {
     return `Generate 3 ${p.platform} captions for an Indian small business.
 Business: ${p.businessName}
 Product/Offer: ${p.description}
-Tone: ${p.tone}${lang}${fest}${fresh}
+Tone: ${p.tone}${lang}${fest}${fresh}${emojiRule}
 
 Rules:
 - Each caption under 150 words.
@@ -48,7 +90,7 @@ Rules:
 Business: ${p.businessName}
 Product: ${p.description}
 ${p.price ? `Price: ${p.price}` : ""}
-Tone: ${p.tone}${lang}${fest}${fresh}
+Tone: ${p.tone}${lang}${fest}${fresh}${emojiRule}
 
 Rules:
 - Under 100 words.
@@ -60,7 +102,7 @@ Rules:
   return `Write a short ${p.platform} ad copy for an Indian small business.
 Business: ${p.businessName}
 Product/Offer: ${p.description}
-Tone: ${p.tone}${lang}${fest}${fresh}
+Tone: ${p.tone}${lang}${fest}${fresh}${emojiRule}
 
 Structure (label each line exactly):
 Hook: <one punchy line>
@@ -75,7 +117,8 @@ serve(async (req) => {
 
   try {
     const payload = (await req.json()) as Payload;
-    if (!payload?.type || !payload?.businessName || !payload?.description) {
+    const isRefine = !!(payload?.refine && payload?.refineText);
+    if (!payload?.type || (!isRefine && (!payload?.businessName || !payload?.description))) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },

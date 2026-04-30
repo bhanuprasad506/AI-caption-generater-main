@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Sparkles, Zap, Languages, Smartphone, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { GeneratorForm, type GenerateInput } from "@/components/GeneratorForm";
 import { OutputCard } from "@/components/OutputCard";
+import { HistoryPanel, type HistoryEntry } from "@/components/HistoryPanel";
 import { Button } from "@/components/ui/button";
 import heroImage from "@/assets/hero.jpg";
 
@@ -23,17 +24,64 @@ function parseOutput(type: GenerateInput["type"], raw: string): OutputItem[] {
     if (parts.length >= 2) return parts.map((text) => ({ text }));
     return [{ text: cleaned }];
   }
+  if (type === "hashtag") {
+    const tags = cleaned
+      .split(/\n+/)
+      .map((l) => l.replace(/^[-*\d\.\)\s]+/, "").trim())
+      .filter((l) => l.startsWith("#"));
+    const all = tags.length > 0 ? tags.join(" ") : cleaned;
+    return [{ text: all, label: `${tags.length || ""} hashtags`.trim() }];
+  }
   if (type === "ad") {
     return [{ text: cleaned, label: "Ad copy" }];
   }
   return [{ text: cleaned, label: "Product description" }];
 }
 
+const HISTORY_KEY = "writeright.history.v1";
+const HISTORY_MAX = 10;
+
 const Index = () => {
   const [loading, setLoading] = useState(false);
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [lastType, setLastType] = useState<GenerateInput["type"]>("caption");
   const [lastInput, setLastInput] = useState<GenerateInput | null>(null);
+  const [refiningIdx, setRefiningIdx] = useState<{ idx: number; mode: "shorter" | "festive" } | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+
+  // Load history from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (raw) setHistory(JSON.parse(raw));
+    } catch {
+      // ignore corrupted history
+    }
+  }, []);
+
+  const persistHistory = (entries: HistoryEntry[]) => {
+    setHistory(entries);
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(entries));
+    } catch {
+      // localStorage may be full or blocked
+    }
+  };
+
+  const addToHistory = (input: GenerateInput, items: OutputItem[]) => {
+    const entry: HistoryEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: Date.now(),
+      type: input.type,
+      businessName: input.businessName,
+      description: input.description,
+      platform: input.platform,
+      language: input.language,
+      preview: items[0]?.text.slice(0, 140) ?? "",
+      outputs: items,
+    };
+    persistHistory([entry, ...history].slice(0, HISTORY_MAX));
+  };
 
   const handleGenerate = async (input: GenerateInput) => {
     setLoading(true);
@@ -48,7 +96,9 @@ const Index = () => {
       if (data?.error) throw new Error(data.error);
       const text: string = data?.text ?? "";
       if (!text) throw new Error("No content returned. Please try again.");
-      setOutputs(parseOutput(input.type, text));
+      const parsed = parseOutput(input.type, text);
+      setOutputs(parsed);
+      addToHistory(input, parsed);
       // Smooth scroll to results
       setTimeout(() => {
         document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -69,9 +119,58 @@ const Index = () => {
     });
   };
 
+  const handleRefine = async (idx: number, mode: "shorter" | "festive") => {
+    if (!lastInput) return;
+    const target = outputs[idx];
+    if (!target) return;
+    setRefiningIdx({ idx, mode });
+    try {
+      const { data, error } = await supabase.functions.invoke("generate", {
+        body: { ...lastInput, refine: mode, refineText: target.text },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+      const text: string = data?.text ?? "";
+      if (!text) throw new Error("No content returned.");
+      const next = [...outputs];
+      next[idx] = { ...target, text: text.trim() };
+      setOutputs(next);
+      toast.success(mode === "shorter" ? "Made it shorter" : "Added more festive vibes");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't refine");
+    } finally {
+      setRefiningIdx(null);
+    }
+  };
+
+  const handleRestoreHistory = (entry: HistoryEntry) => {
+    setOutputs(entry.outputs);
+    setLastType(entry.type);
+    // Reconstruct a minimal lastInput so refine/regenerate still work
+    setLastInput({
+      type: entry.type,
+      businessName: entry.businessName,
+      description: entry.description,
+      platform: entry.platform,
+      tone: "Casual",
+      language: entry.language,
+      festival: "",
+      emojis: true,
+    });
+    setTimeout(() => {
+      document.getElementById("results")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
+
+  const handleClearHistory = () => {
+    persistHistory([]);
+    toast.success("History cleared");
+  };
+
   const heading = useMemo(() => {
     if (lastType === "caption") return "Your captions";
     if (lastType === "product") return "Your product description";
+    if (lastType === "hashtag") return "Your hashtags";
     return "Your ad copy";
   }, [lastType]);
 
@@ -85,12 +184,19 @@ const Index = () => {
           </span>
           WriteRight
         </a>
-        <a
-          href="#generator"
-          className="text-sm font-medium text-muted-foreground transition-smooth hover:text-foreground"
-        >
-          Try it free
-        </a>
+        <div className="flex items-center gap-2">
+          <HistoryPanel
+            entries={history}
+            onRestore={handleRestoreHistory}
+            onClear={handleClearHistory}
+          />
+          <a
+            href="#generator"
+            className="hidden text-sm font-medium text-muted-foreground transition-smooth hover:text-foreground sm:inline"
+          >
+            Try it free
+          </a>
+        </div>
       </header>
 
       {/* Hero */}
@@ -192,7 +298,19 @@ const Index = () => {
               ))}
             {!loading &&
               outputs.map((o, i) => (
-                <OutputCard key={i} index={outputs.length > 1 ? i : undefined} text={o.text} label={o.label} />
+                <OutputCard
+                  key={i}
+                  index={outputs.length > 1 ? i : undefined}
+                  text={o.text}
+                  label={o.label}
+                  platform={lastInput?.platform}
+                  onRefine={
+                    lastType !== "hashtag"
+                      ? (mode) => handleRefine(i, mode)
+                      : undefined
+                  }
+                  refining={refiningIdx?.idx === i ? refiningIdx.mode : null}
+                />
               ))}
           </div>
         </section>

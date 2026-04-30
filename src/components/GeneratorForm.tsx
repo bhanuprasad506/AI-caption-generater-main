@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -12,8 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { PLATFORM_LIMITS, getCounterLabel } from "@/lib/platformLimits";
 
-export type ContentType = "caption" | "product" | "ad";
+export type ContentType = "caption" | "product" | "ad" | "hashtag";
 
 export interface GenerateInput {
   type: ContentType;
@@ -25,6 +27,7 @@ export interface GenerateInput {
   language: string;
   festival: string;
   variant?: number;
+  emojis: boolean;
 }
 
 interface Props {
@@ -34,7 +37,7 @@ interface Props {
 
 const tones = ["Casual", "Professional", "Festive", "Urgent"];
 const platforms = ["Instagram", "WhatsApp", "Facebook", "Google Ads"];
-const languages = ["English", "Hinglish", "Hindi"];
+const languages = ["English", "Hinglish", "Hindi", "Tamil", "Telugu", "Marathi", "Bengali"];
 const festivals = [
   "None",
   "Diwali",
@@ -60,6 +63,7 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
   const [tone, setTone] = useState("Casual");
   const [language, setLanguage] = useState("English");
   const [festival, setFestival] = useState("None");
+  const [emojis, setEmojis] = useState(true);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,8 +77,21 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
       price,
       language,
       festival: festival === "None" ? "" : festival,
+      emojis,
     });
   };
+
+  const limit = PLATFORM_LIMITS[platform];
+  const descCount = description.length;
+
+  const ctaLabel =
+    type === "caption"
+      ? "Captions"
+      : type === "product"
+      ? "Description"
+      : type === "ad"
+      ? "Ad Copy"
+      : "Hashtags";
 
   return (
     <form
@@ -82,10 +99,11 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
       className="rounded-2xl border border-border bg-gradient-card p-6 shadow-soft md:p-8"
     >
       <Tabs value={type} onValueChange={(v) => setType(v as ContentType)}>
-        <TabsList className="grid w-full grid-cols-3 bg-muted">
+        <TabsList className="grid w-full grid-cols-4 bg-muted">
           <TabsTrigger value="caption">Caption</TabsTrigger>
           <TabsTrigger value="product">Product</TabsTrigger>
           <TabsTrigger value="ad">Ad Copy</TabsTrigger>
+          <TabsTrigger value="hashtag">Hashtags</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -103,16 +121,33 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
 
         <div className="grid gap-2">
           <Label htmlFor="desc">
-            {type === "product" ? "Product details" : "What are you selling or promoting?"}
+            {type === "product"
+              ? "Product details"
+              : type === "hashtag"
+              ? "Niche / product / keywords"
+              : "What are you selling or promoting?"}
           </Label>
           <Textarea
             id="desc"
-            placeholder="e.g. Handloom cotton sarees, Diwali festive collection, free shipping above ₹999"
+            placeholder={
+              type === "hashtag"
+                ? "e.g. handloom sarees, ethnic wear, Bangalore boutique"
+                : "e.g. Handloom cotton sarees, Diwali festive collection, free shipping above ₹999"
+            }
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
             required
           />
+          {limit && type !== "hashtag" && (
+            <p
+              className={`text-xs ${
+                descCount > limit.max ? "text-destructive" : "text-muted-foreground"
+              }`}
+            >
+              {getCounterLabel(platform, descCount)}
+            </p>
+          )}
         </div>
 
         {type === "product" && (
@@ -193,6 +228,16 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
           </div>
         </div>
 
+        {type !== "hashtag" && (
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-3">
+            <div>
+              <Label htmlFor="emojis" className="cursor-pointer">Use emojis</Label>
+              <p className="text-xs text-muted-foreground">Add tasteful emojis to the copy</p>
+            </div>
+            <Switch id="emojis" checked={emojis} onCheckedChange={setEmojis} />
+          </div>
+        )}
+
         <Button
           type="submit"
           variant="hero"
@@ -208,7 +253,7 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
           ) : (
             <>
               <Sparkles className="mr-2 h-5 w-5" />
-              Generate {type === "caption" ? "Captions" : type === "product" ? "Description" : "Ad Copy"}
+              Generate {ctaLabel}
             </>
           )}
         </Button>
