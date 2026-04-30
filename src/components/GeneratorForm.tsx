@@ -22,6 +22,9 @@ export interface GenerateInput {
   platform: string;
   tone: string;
   price?: string;
+  language: string;
+  festival: string;
+  variant?: number;
 }
 
 interface Props {
@@ -31,6 +34,22 @@ interface Props {
 
 const tones = ["Casual", "Professional", "Festive", "Urgent"];
 const platforms = ["Instagram", "WhatsApp", "Facebook", "Google Ads"];
+const languages = ["English", "Hinglish", "Hindi"];
+const festivals = [
+  "None",
+  "Diwali",
+  "Holi",
+  "Eid",
+  "Raksha Bandhan",
+  "Onam",
+  "Pongal",
+  "Navratri",
+  "Ganesh Chaturthi",
+  "Christmas",
+  "New Year",
+  "Republic Day",
+  "Independence Day",
+];
 
 export const GeneratorForm = ({ onGenerate, loading }: Props) => {
   const [type, setType] = useState<ContentType>("caption");
@@ -39,11 +58,22 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
   const [price, setPrice] = useState("");
   const [platform, setPlatform] = useState("Instagram");
   const [tone, setTone] = useState("Casual");
+  const [language, setLanguage] = useState("English");
+  const [festival, setFestival] = useState("None");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!businessName.trim() || !description.trim()) return;
-    onGenerate({ type, businessName, description, platform, tone, price });
+    onGenerate({
+      type,
+      businessName,
+      description,
+      platform,
+      tone,
+      price,
+      language,
+      festival: festival === "None" ? "" : festival,
+    });
   };
 
   return (
@@ -123,6 +153,39 @@ export const GeneratorForm = ({ onGenerate, loading }: Props) => {
                 {tones.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label>Language</Label>
+            <Select value={language} onValueChange={setLanguage}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {languages.map((l) => (
+                  <SelectItem key={l} value={l}>
+                    {l}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label>Festival (optional)</Label>
+            <Select value={festival} onValueChange={setFestival}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {festivals.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {f}
                   </SelectItem>
                 ))}
               </SelectContent>

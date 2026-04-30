@@ -14,14 +14,27 @@ interface Payload {
   platform: string;
   tone: string;
   price?: string;
+  language?: string; // "English" | "Hindi" | "Hinglish"
+  festival?: string; // e.g. "Diwali", "Holi", "" for none
+  variant?: number;  // bump to force a fresh regeneration
 }
 
 function buildPrompt(p: Payload): string {
+  const lang = p.language && p.language !== "English"
+    ? `\nLanguage: Write in ${p.language}${p.language === "Hinglish" ? " (mix of Hindi written in Roman/English script and English, like real Indian social media)" : p.language === "Hindi" ? " (Devanagari script, natural conversational Hindi)" : ""}.`
+    : "";
+  const fest = p.festival
+    ? `\nFestival context: Weave in a natural, tasteful reference to ${p.festival} (greetings, themes, or offer angle).`
+    : "";
+  const fresh = p.variant && p.variant > 0
+    ? `\nIMPORTANT: Produce a FRESH variation different from previous attempts. Use new hooks, angles and wording.`
+    : "";
+
   if (p.type === "caption") {
     return `Generate 3 ${p.platform} captions for an Indian small business.
 Business: ${p.businessName}
 Product/Offer: ${p.description}
-Tone: ${p.tone}
+Tone: ${p.tone}${lang}${fest}${fresh}
 
 Rules:
 - Each caption under 150 words.
@@ -35,7 +48,7 @@ Rules:
 Business: ${p.businessName}
 Product: ${p.description}
 ${p.price ? `Price: ${p.price}` : ""}
-Tone: ${p.tone}
+Tone: ${p.tone}${lang}${fest}${fresh}
 
 Rules:
 - Under 100 words.
@@ -47,7 +60,7 @@ Rules:
   return `Write a short ${p.platform} ad copy for an Indian small business.
 Business: ${p.businessName}
 Product/Offer: ${p.description}
-Tone: ${p.tone}
+Tone: ${p.tone}${lang}${fest}${fresh}
 
 Structure (label each line exactly):
 Hook: <one punchy line>

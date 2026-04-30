@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Sparkles, Zap, Languages, Smartphone } from "lucide-react";
+import { Sparkles, Zap, Languages, Smartphone, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { GeneratorForm, type GenerateInput } from "@/components/GeneratorForm";
 import { OutputCard } from "@/components/OutputCard";
+import { Button } from "@/components/ui/button";
 import heroImage from "@/assets/hero.jpg";
 
 interface OutputItem {
@@ -32,11 +33,13 @@ const Index = () => {
   const [loading, setLoading] = useState(false);
   const [outputs, setOutputs] = useState<OutputItem[]>([]);
   const [lastType, setLastType] = useState<GenerateInput["type"]>("caption");
+  const [lastInput, setLastInput] = useState<GenerateInput | null>(null);
 
   const handleGenerate = async (input: GenerateInput) => {
     setLoading(true);
     setOutputs([]);
     setLastType(input.type);
+    setLastInput(input);
     try {
       const { data, error } = await supabase.functions.invoke("generate", {
         body: input,
@@ -56,6 +59,14 @@ const Index = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleRegenerate = async () => {
+    if (!lastInput) return;
+    await handleGenerate({
+      ...lastInput,
+      variant: (lastInput.variant ?? 0) + 1,
+    });
   };
 
   const heading = useMemo(() => {
@@ -151,10 +162,25 @@ const Index = () => {
       {/* Results */}
       {(loading || outputs.length > 0) && (
         <section id="results" className="container pb-24">
-          <h2 className="font-display text-2xl font-bold md:text-3xl">{heading}</h2>
-          <p className="mt-2 text-muted-foreground">
-            Tap copy and paste straight into your post.
-          </p>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 className="font-display text-2xl font-bold md:text-3xl">{heading}</h2>
+              <p className="mt-2 text-muted-foreground">
+                Tap copy and paste straight into your post.
+              </p>
+            </div>
+            {outputs.length > 0 && !loading && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleRegenerate}
+                disabled={loading}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Regenerate
+              </Button>
+            )}
+          </div>
 
           <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {loading &&
