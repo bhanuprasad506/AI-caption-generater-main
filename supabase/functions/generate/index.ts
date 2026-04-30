@@ -1,0 +1,129 @@
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+type ContentType = "caption" | "product" | "ad";
+
+interface Payload {
+  type: ContentType;
+  businessName: string;
+  description: string;
+  platform: string;
+  tone: string;
+  price?: string;
+}
+
+function buildPrompt(p: Payload): string {
+  if (p.type === "caption") {
+    return `Generate 3 ${p.platform} captions for an Indian small business.
+Business: ${p.businessName}
+Product/Offer: ${p.description}
+Tone: ${p.tone}
+
+Rules:
+- Each caption under 150 words.
+- End each with 5 relevant hashtags.
+- Resonate with Indian customers (use cultural cues if relevant).
+- Output ONLY the 3 captions, clearly numbered "1.", "2.", "3." with a blank line between each.
+- No preamble, no explanations.`;
+  }
+  if (p.type === "product") {
+    return `Write a WhatsApp-ready product description for an Indian business.
+Business: ${p.businessName}
+Product: ${p.description}
+${p.price ? `Price: ${p.price}` : ""}
+Tone: ${p.tone}
+
+Rules:
+- Under 100 words.
+- Simple, conversational language.
+- Include a clear CTA like "Order now on WhatsApp".
+- No markdown, no bullet symbols. Plain text only.
+- Output ONLY the description.`;
+  }
+  return `Write a short ${p.platform} ad copy for an Indian small business.
+Business: ${p.businessName}
+Product/Offer: ${p.description}
+Tone: ${p.tone}
+
+Structure (label each line exactly):
+Hook: <one punchy line>
+Body: <2-3 short sentences highlighting value>
+CTA: <one strong call to action>
+
+Rules: Keep total under 80 words. Output ONLY those three labeled lines.`;
+}
+
+serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  try {
+    const payload = (await req.json()) as Payload;
+    if (!payload?.type || !payload?.businessName || !payload?.description) {
+      return new Response(JSON.stringify({ error: "Missing required fields" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
+
+    const prompt = buildPrompt(payload);
+
+    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-3-flash-preview",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are an expert copywriter for Indian small businesses. Write clear, engaging, culturally aware copy. Follow output formatting rules exactly. Never include preamble or explanations.",
+          },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+
+    if (!resp.ok) {
+      if (resp.status === 429) {
+        return new Response(
+          JSON.stringify({ error: "Too many requests. Please wait a moment and try again." }),
+          { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      if (resp.status === 402) {
+        return new Response(
+          JSON.stringify({ error: "AI credits exhausted. Please add credits in workspace settings." }),
+          { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      const t = await resp.text();
+      console.error("AI gateway error:", resp.status, t);
+      return new Response(JSON.stringify({ error: "AI gateway error" }), {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const data = await resp.json();
+    const text: string = data?.choices?.[0]?.message?.content ?? "";
+    return new Response(JSON.stringify({ text }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } catch (e) {
+    console.error("generate error:", e);
+    return new Response(
+      JSON.stringify({ error: e instanceof Error ? e.message : "Unknown error" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
+});
