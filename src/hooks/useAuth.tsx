@@ -1,96 +1,76 @@
+// Auth without Supabase — stores user in localStorage
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "@/integrations/supabase/client";
-import type { Tables } from "@/integrations/supabase/types";
 
-type Profile = Tables<"profiles">;
+interface LocalUser {
+  id: string;
+  email: string;
+  full_name: string;
+}
 
 interface AuthContextValue {
-  session: Session | null;
-  user: User | null;
-  profile: Profile | null;
+  user: LocalUser | null;
+  profile: { tier: "free" | "pro"; credits: number } | null;
   loading: boolean;
-  signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
+const AUTH_KEY = "writeright.user";
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function loadUser(): LocalUser | null {
+  try {
+    const raw = localStorage.getItem(AUTH_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
-    setProfile(data as Profile | null);
-  };
-
-  const refreshProfile = async () => {
-    if (user) await fetchProfile(user.id);
-  };
-
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
-      setLoading(false);
-    });
-
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
+    setUser(loadUser());
+    setLoading(false);
   }, []);
 
-  const signInWithGoogle = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: { redirectTo: window.location.origin },
-    });
+  const signUpWithEmail = async (email: string, _password: string, fullName: string) => {
+    const u: LocalUser = { id: `user-${Date.now()}`, email, full_name: fullName };
+    localStorage.setItem(AUTH_KEY, JSON.stringify(u));
+    setUser(u);
   };
 
-  const signInWithEmail = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  };
-
-  const signUpWithEmail = async (email: string, password: string, fullName: string) => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
-    });
-    if (error) throw error;
+  const signInWithEmail = async (email: string, _password: string) => {
+    // For local auth, sign in = sign up with same email
+    const existing = loadUser();
+    if (existing && existing.email === email) {
+      setUser(existing);
+    } else {
+      const u: LocalUser = { id: `user-${Date.now()}`, email, full_name: email.split("@")[0] };
+      localStorage.setItem(AUTH_KEY, JSON.stringify(u));
+      setUser(u);
+    }
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem(AUTH_KEY);
+    setUser(null);
   };
 
+  const refreshProfile = async () => {};
+
   return (
-    <AuthContext.Provider
-      value={{ session, user, profile, loading, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, refreshProfile }}
-    >
+    <AuthContext.Provider value={{
+      user,
+      profile: user ? { tier: "free", credits: 0 } : null,
+      loading,
+      signInWithEmail,
+      signUpWithEmail,
+      signOut,
+      refreshProfile,
+    }}>
       {children}
     </AuthContext.Provider>
   );
