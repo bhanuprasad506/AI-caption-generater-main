@@ -1,20 +1,40 @@
 import { useState } from "react";
-import { Check, Copy, Scissors, Sparkles, Loader2 } from "lucide-react";
+import { Check, Copy, Scissors, Sparkles, Loader2, Star, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { PLATFORM_LIMITS, countWords, getCounterLabel } from "@/lib/platformLimits";
+import { saveOutput } from "@/components/SavedLibrary";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Props {
   index?: number;
   text: string;
   label?: string;
   platform?: string;
+  contentType?: string;
+  businessName?: string;
+  language?: string;
   onRefine?: (mode: "shorter" | "festive") => Promise<void> | void;
   refining?: "shorter" | "festive" | null;
+  onDownloadPoster?: () => void;
 }
 
-export const OutputCard = ({ index, text, label, platform, onRefine, refining }: Props) => {
+export const OutputCard = ({
+  index,
+  text,
+  label,
+  platform,
+  contentType,
+  businessName,
+  language,
+  onRefine,
+  refining,
+  onDownloadPoster,
+}: Props) => {
+  const { user } = useAuth();
   const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const handleCopy = async () => {
     try {
@@ -24,6 +44,29 @@ export const OutputCard = ({ index, text, label, platform, onRefine, refining }:
       setTimeout(() => setCopied(false), 1800);
     } catch {
       toast.error("Couldn't copy. Please try again.");
+    }
+  };
+
+  const handleSave = async () => {
+    if (!user) {
+      toast.error("Sign in to save outputs to your library");
+      return;
+    }
+    setSaving(true);
+    const ok = await saveOutput(user.id, {
+      content_type: contentType ?? "caption",
+      text,
+      label,
+      platform,
+      language,
+      business_name: businessName,
+    });
+    setSaving(false);
+    if (ok) {
+      setSaved(true);
+      toast.success("Saved to library");
+    } else {
+      toast.error("Couldn't save. Please try again.");
     }
   };
 
@@ -43,24 +86,55 @@ export const OutputCard = ({ index, text, label, platform, onRefine, refining }:
           )}
           {label ?? `Variant ${typeof index === "number" ? index + 1 : ""}`}
         </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          onClick={handleCopy}
-          className="opacity-80 hover:opacity-100"
-        >
-          {copied ? (
-            <>
-              <Check className="mr-1.5 h-4 w-4 text-accent" /> Copied
-            </>
-          ) : (
-            <>
-              <Copy className="mr-1.5 h-4 w-4" /> Copy
-            </>
+        <div className="flex items-center gap-1">
+          {/* Save to library */}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={handleSave}
+            disabled={saving || saved}
+            className="opacity-80 hover:opacity-100"
+            title="Save to library"
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : saved ? (
+              <Star className="h-4 w-4 fill-primary text-primary" />
+            ) : (
+              <Star className="h-4 w-4" />
+            )}
+          </Button>
+          {/* Poster download */}
+          {onDownloadPoster && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={onDownloadPoster}
+              className="opacity-80 hover:opacity-100"
+              title="Download as poster"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
           )}
-        </Button>
+          {/* Copy */}
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={handleCopy}
+            className="opacity-80 hover:opacity-100"
+          >
+            {copied ? (
+              <><Check className="mr-1.5 h-4 w-4 text-accent" /> Copied</>
+            ) : (
+              <><Copy className="mr-1.5 h-4 w-4" /> Copy</>
+            )}
+          </Button>
+        </div>
       </header>
+
       <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/90">{text}</p>
 
       <footer className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
