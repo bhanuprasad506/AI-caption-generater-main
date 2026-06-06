@@ -23,7 +23,7 @@ export function useGenerate() {
       const prompt = buildPrompt(payload);
       let text: string;
 
-      // Image captions with photo → use Gemini Vision
+      // Image captions with photo use Gemini Vision.
       if (payload.type === "image_caption" && payload.imageBase64) {
         text = await callGeminiVision(
           [
@@ -33,7 +33,7 @@ export function useGenerate() {
           SYSTEM
         );
       } else {
-        // Everything else → use Groq
+        // Everything else uses Gemini text generation.
         text = await callGemini([{ text: prompt }], SYSTEM);
       }
 

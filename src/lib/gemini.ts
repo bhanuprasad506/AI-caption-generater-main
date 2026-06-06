@@ -1,105 +1,136 @@
-// Central AI client — uses Groq (fast, free, no credit card)
-// Falls back to Gemini if VITE_GEMINI_API_KEY is set
+// Central AI client - uses Google Gemini.
 
-const GROQ_MODEL = "llama-3.3-70b-versatile";
-const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { Part } from "@google/generative-ai";
 
 const GEMINI_MODEL = "gemini-2.0-flash";
-const GEMINI_URL = (key: string) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${key}`;
-
-export function getGroqKey(): string {
-  return import.meta.env.VITE_GROQ_API_KEY ?? "";
-}
 
 export function getGeminiKey(): string {
-  return import.meta.env.VITE_GEMINI_API_KEY ?? "";
+  return (
+    import.meta.env.NEXT_PUBLIC_GOOGLE_GEMINI_API_KEY ??
+    import.meta.env.VITE_GOOGLE_GEMINI_API_KEY ??
+    import.meta.env.VITE_GEMINI_API_KEY ??
+    ""
+  );
 }
 
 export type GeminiPart =
   | { text: string }
   | { inline_data: { mime_type: string; data: string } };
 
-// For image captions — uses Gemini Vision (requires Gemini key)
+function getGeminiClient(): GoogleGenerativeAI {
+  const key = getGeminiKey();
+  if (!key || key.includes("your_key_here") || key.includes("paste_your")) {
+    throw new Error("Gemini API key needed. Add NEXT_PUBLIC_GOOGLE_GEMINI_API_KEY to .env.local.");
+  }
+  return new GoogleGenerativeAI(key);
+}
+
+function toSdkPart(part: GeminiPart): Part {
+  if ("text" in part) return { text: part.text };
+  return {
+    inlineData: {
+      mimeType: part.inline_data.mime_type,
+      data: part.inline_data.data,
+    },
+  };
+}
+
+async function generateGeminiText(
+  parts: GeminiPart[],
+  systemInstruction?: string
+): Promise<string> {
+  try {
+    const model = getGeminiClient().getGenerativeModel({
+      model: GEMINI_MODEL,
+      generationConfig: { temperature: 0.9, maxOutputTokens: 1500 },
+      ...(systemInstruction ? { systemInstruction } : {}),
+    });
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: parts.map(toSdkPart) }],
+    });
+    const text = result.response.text();
+    if (!text) throw new Error("No content returned. Please try again.");
+    return text;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Gemini request failed.";
+    if (message.includes("429") || message.includes("RESOURCE_EXHAUSTED")) {
+      throw new Error("Gemini quota exceeded. Try again later.");
+    }
+    throw new Error(message.slice(0, 120));
+  }
+}
+
+// For image captions - uses Gemini Vision.
 export async function callGeminiVision(
   parts: GeminiPart[],
   systemInstruction?: string
 ): Promise<string> {
-  const key = getGeminiKey();
-  if (!key || key === "paste_your_gemini_key_here") {
-    throw new Error("Gemini API key needed for image captions. Add VITE_GEMINI_API_KEY to .env");
-  }
-  const body: Record<string, unknown> = {
-    contents: [{ parts }],
-    generationConfig: { temperature: 0.9, maxOutputTokens: 1500 },
-  };
-  if (systemInstruction) {
-    body.systemInstruction = { parts: [{ text: systemInstruction }] };
-  }
-  const resp = await fetch(GEMINI_URL(key), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    const msg: string = err?.error?.message ?? `Gemini error ${resp.status}`;
-    if (resp.status === 429) throw new Error("Gemini quota exceeded. Try again later.");
-    throw new Error(msg.slice(0, 120));
-  }
-  const data = await resp.json();
-  return data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return generateGeminiText(parts, systemInstruction);
 }
 
-// Main text generation — uses Groq
+// Main text generation - uses Gemini.
 export async function callGemini(
   parts: GeminiPart[],
   systemInstruction?: string
 ): Promise<string> {
-  const groqKey = getGroqKey();
-
-  // Use Groq if key is available
-  if (groqKey && groqKey !== "paste_your_groq_key_here") {
-    const textContent = parts.filter((p): p is { text: string } => "text" in p).map((p) => p.text).join("\n");
-    const resp = await fetch(GROQ_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${groqKey}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        messages: [
-          ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
-          { role: "user", content: textContent },
-        ],
-        temperature: 0.9,
-        max_tokens: 1500,
-      }),
-    });
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      const msg: string = err?.error?.message ?? `Groq error ${resp.status}`;
-      if (resp.status === 429) throw new Error("Too many requests — please wait a moment and try again.");
-      throw new Error(msg.slice(0, 120));
-    }
-    const data = await resp.json();
-    const text = data?.choices?.[0]?.message?.content ?? "";
-    if (!text) throw new Error("No content returned. Please try again.");
-    return text;
-  }
-
-  // Fallback to Gemini text-only
-  const geminiKey = getGeminiKey();
-  if (!geminiKey || geminiKey === "paste_your_gemini_key_here") {
-    throw new Error("No API key configured. Add VITE_GROQ_API_KEY to your .env file.");
-  }
-  return callGeminiVision(parts, systemInstruction);
+  return generateGeminiText(parts, systemInstruction);
 }
 
 // ── Prompt builders ────────────────────────────────────────────────────────
 
 const SYSTEM = "You are an expert copywriter for Indian creators and businesses. Write clear, engaging, culturally aware copy. Follow output formatting rules exactly. Never include preamble or explanations.";
+
+const generatePrompt = (businessName: string, product: string, tone: string, platform: string) => `
+You are an expert Indian social media copywriter who has
+worked with 500+ Indian small businesses. You deeply
+understand Indian culture, festivals, emotions, and how
+Indian customers make buying decisions.
+
+BUSINESS: ${businessName}
+PRODUCT/OFFER: ${product}
+TONE: ${tone}
+PLATFORM: ${platform}
+
+TONE RULES:
+- Casual: Use friendly Hinglish words naturally
+  (yaar, bhai, ekdum, bindaas, mast). Feel like
+  a friend recommending something.
+- Professional: Clean English, no slang, trust-building
+  words (genuine, quality, trusted, reliable)
+- Festive: Use festival energy (Diwali, Eid, Pongal
+  based on context), emojis, celebratory language
+- Urgent: Scarcity words (limited, today only,
+  last few left, don't miss), countdown feeling
+
+PLATFORM RULES:
+- Instagram: Start with a hook line, use 4-5
+  relevant emojis naturally, end with 5 hashtags
+  mixing English + Hindi (#MadeInIndia #SalonGoals)
+- WhatsApp: Conversational, short paragraphs,
+  feels like a message from a friend, end with
+  a clear WhatsApp CTA like "Reply YES to book"
+- Facebook: Slightly longer, story-driven,
+  end with "Comment below" or "Tag a friend"
+- Google Ads: Under 90 characters headline +
+  180 character description, benefit-first
+
+OUTPUT FORMAT:
+Generate exactly 3 variants. Number them 1, 2, 3.
+Each variant must feel completely different —
+different hook, different angle, different emotion.
+Never repeat the same opening word across variants.
+Make every word earn its place — no filler phrases.
+
+QUALITY CHECK before outputting:
+- Would an Indian customer stop scrolling for this?
+- Does it mention a specific benefit, not just features?
+- Is the CTA clear and actionable?
+- Does it match the selected tone perfectly?
+
+Output only the 3 variants. No explanations.
+No preamble. No "Here are your captions".
+Just the 3 numbered outputs ready to copy-paste.`;
 
 function langNote(language: string): string {
   const map: Record<string, string> = {
@@ -173,16 +204,7 @@ Rules:
 - End each with 5 relevant personal hashtags.
 - Output ONLY the 3 captions, numbered "1.", "2.", "3." with a blank line between each.`;
     }
-    return `Generate 3 ${p.platform ?? "Instagram"} captions for an Indian small business.
-Business: ${name}
-Product/Offer: ${p.description}
-Tone: ${p.tone ?? "Casual"}${lang}${fest}${fresh}${emoji}
-
-Rules:
-- Each caption under 150 words.
-- End each with 5 relevant hashtags.
-- Resonate with Indian customers.
-- Output ONLY the 3 captions, numbered "1.", "2.", "3." with a blank line between each.`;
+    return generatePrompt(name, p.description, p.tone ?? "Casual", p.platform ?? "Instagram");
   }
 
   // ── Hashtags ─────────────────────────────────────────────────────────────
